@@ -2,6 +2,8 @@ package fr.pantheonsorbonne.miage.jms;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.StringReader;
 
 import javax.annotation.PostConstruct;
 import javax.enterprise.context.ApplicationScoped;
@@ -14,8 +16,14 @@ import javax.jms.MessageConsumer;
 import javax.jms.MessageProducer;
 import javax.jms.Queue;
 import javax.jms.Session;
+import javax.jms.BytesMessage;
+import javax.jms.TextMessage;
+import javax.xml.bind.JAXBContext;
+import javax.xml.bind.JAXBException;
 
 import fr.pantheonsorbonne.ufr27.miage.DiplomaInfo;
+import fr.pantheonsorbonne.miage.diploma.DiplomaGenerator;
+import fr.pantheonsorbonne.miage.diploma.MiageDiplomaGenerator;
 
 @ApplicationScoped
 public class PdfGeneratorMessageHandler implements Closeable {
@@ -58,7 +66,17 @@ public class PdfGeneratorMessageHandler implements Closeable {
 		// create a jaxbcontext, binding the DiplomaInfo class
 		// unmarshall the texte message body with the JaxBcontext
 		// use the handleReceivedDiplomaSpect method to generate the diploma an send it through the wire
-		
+
+		try {
+			TextMessage textMessage = (TextMessage) diplomaRequestConsummer.receive();
+			JAXBContext jaxbContext = JAXBContext.newInstance(DiplomaInfo.class);
+			DiplomaInfo diplomaInfo = (DiplomaInfo) jaxbContext.createUnmarshaller()
+					.unmarshal(new StringReader(textMessage.getText()));
+
+			handledReceivedDiplomaSpect(diplomaInfo);
+		} catch (JMSException | JAXBException e) {
+
+		}
 	}
 
 	private void handledReceivedDiplomaSpect(DiplomaInfo diploma) {
@@ -71,6 +89,17 @@ public class PdfGeneratorMessageHandler implements Closeable {
 		// write
 		// close the IS
 
+		
+		try {
+			DiplomaGenerator diplomaGenerator = new MiageDiplomaGenerator(diploma.getStudent());
+			InputStream inputStream = diplomaGenerator.getContent();
+			byte[] array = new byte[inputStream.available()];
+			inputStream.read(array);
+			this.sendBinaryDiploma(diploma, array);
+			inputStream.close();
+		} catch (IOException e) {
+		}
+
 	}
 
 	public void sendBinaryDiploma(DiplomaInfo info, byte[] data) {
@@ -78,6 +107,15 @@ public class PdfGeneratorMessageHandler implements Closeable {
 		// set an IntProperty on the message containing the id of the diploma
 		// write the bytes into the bytesmessage
 		// send the message through the producer
+		
+		try {
+			BytesMessage bytesMessage = this.session.createBytesMessage();
+			bytesMessage.setIntProperty("id", info.getId());
+			bytesMessage.writeBytes(data);
+			this.diplomaFileProducer.send(bytesMessage);
+
+		} catch (JMSException e) {
+		}
 
 	}
 
